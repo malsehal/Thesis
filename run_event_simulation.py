@@ -60,7 +60,7 @@ def main():
 
     sim_minutes = sim_days * 24 * 60
     env = Environment(squares_rows=squares_rows, squares_cols=squares_cols)
-    demand = generate_demand(scenario_key, env, sim_minutes, rng_seed=42)
+    demand = generate_demand(scenario_key, env, sim_minutes, rng_seed=42, arch_policy=arch_policy)
 
     # print("\n=== Generated Demand (Spectrum Requests) ===")
     # for req in demand:
@@ -89,6 +89,9 @@ def main():
     for k, v in results.items():
         print(f"{k}: {v}")
 
+    # --- DEBUG: Print all active assignments at the end ---
+    final_assignments = simulation.spectrum_manager.active
+    
     # --- DEBUG: Compare admitted users in both modes ---
     # Print all admitted user IDs for comparison
     admitted_users = [req.req_id for req in demand if getattr(req, 'is_assigned', False)]

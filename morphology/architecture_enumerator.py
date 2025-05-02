@@ -66,7 +66,8 @@ def is_feasible(arch):
       1. Dynamic licensing may not be used with Database Only sensing.
       2. Dynamic licensing may not be paired with Auction Based pricing.
       3. Decentralized coordination may not be paired with Auction Based pricing.
-      4. If priority is Exclusive, licensing must be Manual; otherwise that combo is infeasible.
+      4. If priority is Exclusive, licensing must be Manual and coordination must be Centralized; otherwise that combo is infeasible.
+      5. Dynamic licensing may not be paired with Passive enforcement.
     """
     # Rule 1: Dynamic licensing may not be used with Database Only sensing.
     if arch.licensing_mode == "Dynamic" and arch.sensing_mode == "Database Only":
@@ -80,8 +81,12 @@ def is_feasible(arch):
     if arch.coordination_mode == "Decentralized" and arch.pricing_mode == "Auction Based":
         return False
     
-    # Rule 4: If priority is Exclusive, licensing must be Manual; otherwise that combo is infeasible.
-    if arch.priority_mode == "Exclusive" and arch.licensing_mode != "Manual":
+    # Rule 4: If priority is Exclusive, licensing must be Manual and coordination must be Centralized; otherwise that combo is infeasible.
+    if arch.priority_mode == "Exclusive" and (arch.licensing_mode != "Manual" or arch.coordination_mode != "Centralized"):
+        return False
+    
+    # Rule 5: Dynamic licensing may not be paired with Passive enforcement.
+    if arch.licensing_mode == "Dynamic" and arch.enforcement_mode == "Passive":
         return False
     
     return True

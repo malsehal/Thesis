@@ -41,7 +41,7 @@ architectures = generate_all_architectures(apply_filter=True)
 all_results = []
 for arch in tqdm(architectures, desc="Architectures", unit="arch"):
     env = Environment(squares_rows=SCENARIO_CONFIG["squares_rows"], squares_cols=SCENARIO_CONFIG["squares_cols"])
-    demand = generate_demand(SCENARIO_KEY, env, sim_minutes, rng_seed=42)
+    demand = generate_demand(SCENARIO_KEY, env, sim_minutes, rng_seed=42, arch_policy=arch)
     simulation = EventDrivenSimulation(env, arch, demand, sim_minutes)
     results = simulation.run()
     results["architecture_id"] = str(arch)

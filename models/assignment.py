@@ -77,9 +77,16 @@ class Assignment:
         if not shared_squares:
             return "none"
             
+        # Special case for 1-square environment: all nodes overlap, so only diagonally opposite nodes are 'opposite', others are 'adjacent'
+        # Assume square is 2x2 nodes (node IDs: 0,1,2,3) for 1-square environment
+        if len(environment.nodes) == 4 and len(shared_squares) == 1:
+            pairs_opposite = {(0,3), (3,0), (1,2), (2,1)}
+            if (this_node.node_id, other_node.node_id) in pairs_opposite:
+                return "opposite"
+            else:
+                return "adjacent"
         # Calculate Manhattan distance between nodes
         manhattan_dist = abs(this_node.row - other_node.row) + abs(this_node.col - other_node.col)
-        
         # Adjacent nodes are 1 unit away (either same row or same column)
         if manhattan_dist == 1:
             return "adjacent"
@@ -105,22 +112,35 @@ class Assignment:
         if mitigation == "No Mitigation":
             return False
         relationship = self.get_node_relationship(other, environment)
-        if relationship == "same":
-            return False
-        elif relationship == "adjacent":
-            if mitigation in ["Power Control", "Beamforming", "Combination"]:
-                quality_factor = 0.5
-                self.quality *= quality_factor
-                other.quality *= quality_factor
-                return True
-            return False
-        elif relationship == "opposite":
-            if mitigation in ["Power Control", "Beamforming", "Combination"]:
+        if mitigation == "Power Control":
+            if relationship == "opposite":
                 quality_factor = 0.7
                 self.quality *= quality_factor
                 other.quality *= quality_factor
                 return True
-            return False
+            else:
+                return False
+        elif mitigation == "Beamforming":
+            if relationship == "opposite":
+                quality_factor = 0.7
+                self.quality *= quality_factor
+                other.quality *= quality_factor
+                return True
+            else:
+                return False
+        elif mitigation == "Combination":
+            if relationship == "opposite":
+                quality_factor = 0.7
+                self.quality *= quality_factor
+                other.quality *= quality_factor
+                return True
+            elif relationship == "adjacent":
+                quality_factor = 0.5
+                self.quality *= quality_factor
+                other.quality *= quality_factor
+                return True
+            else:
+                return False
         # Frequency hopping doesn't resolve spatial overlap directly
         if mitigation == "Frequency Hopping":
             return False

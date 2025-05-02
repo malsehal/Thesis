@@ -19,7 +19,7 @@ from models.request import SpectrumRequest
 from config.parameters import FREQ_BASE_MHZ, TOTAL_BANDWIDTH_MHZ
 from config.scenarios import SCENARIOS, DEFAULT_SIM_MINUTES
 
-def generate_demand(scenario_key, environment, sim_minutes=DEFAULT_SIM_MINUTES, rng_seed=42):
+def generate_demand(scenario_key, environment, sim_minutes=DEFAULT_SIM_MINUTES, rng_seed=42, arch_policy=None):
     """
     Generates a list of SpectrumRequest objects based on the specified scenario.
 
@@ -28,6 +28,7 @@ def generate_demand(scenario_key, environment, sim_minutes=DEFAULT_SIM_MINUTES, 
       environment: An environment instance that contains nodes.
       sim_minutes (int): The simulation duration in minutes.
       rng_seed (int): Seed for the random number generator.
+      arch_policy: ArchitecturePolicy instance (optional) to allow demand scaling by pricing_mode.
 
     Returns:
       List[SpectrumRequest]: The list of generated requests, ordered by arrival time.
@@ -43,7 +44,27 @@ def generate_demand(scenario_key, environment, sim_minutes=DEFAULT_SIM_MINUTES, 
     
     # Filter the arrival minutes to those within the simulation horizon
     arrival_minutes = [t for t in scenario.arrival_minutes if t < sim_minutes]
-    
+
+    # --- Dynamic demand scaling based on pricing_mode ---
+    pricing_mult = 1.0
+    if arch_policy is not None:
+        pricing_mode = getattr(arch_policy, "pricing_mode", "Usage Based")
+        pricing_mult = {
+            "No Cost": 1.2,
+            "Usage Based": 1.0,
+            "Auction Based": 0.8
+        }.get(pricing_mode, 1.0)
+    n_arrivals = int(len(arrival_minutes) * pricing_mult)
+    if pricing_mult >= 1.0:
+        extra_needed = n_arrivals - len(arrival_minutes)
+        if extra_needed > 0:
+            # Sample extra arrival times from the original list (with replacement)
+            extra_arrivals = random.choices(arrival_minutes, k=extra_needed)
+            arrival_minutes = arrival_minutes + extra_arrivals
+        random.shuffle(arrival_minutes)
+    else:
+        arrival_minutes = arrival_minutes[:n_arrivals]
+
     # Evenly distribute requests across nodes via round-robin
     nodes = environment.nodes
     n_nodes = len(nodes)

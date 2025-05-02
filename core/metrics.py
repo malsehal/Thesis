@@ -24,6 +24,13 @@ class MetricsCollector:
         self.total_mhz_min_km2 = 0.0    # Total MHz·km²·minutes
         self.coordination_cost = 0.0    # Total coordination cost (for dynamic/semi-dynamic renewals)
     
+    # Sensing multipliers for post-processing (configurable)
+    SENSING_MULTIPLIERS = {
+        'Device Based': 0.7,  # Most efficient
+        'Infrastructure Sensors': 0.8,  # Moderately efficient
+        'Database Only': 1.0  # Baseline
+    }
+    
     def update_usage(self, active_assignments, environment, tick_minutes=1):
         """
         Update spectrum usage metrics based on active assignments.
@@ -134,8 +141,9 @@ class MetricsCollector:
 
     def apply_query_multipliers(self, coord_queries, arch_policy):
         """
-        Apply post-processing multipliers to the coord_queries metric based on freq_plan, enforcement_mode, and priority_mode,
+        Apply post-processing multipliers to the coord_queries metric based on freq_plan, enforcement_mode, priority_mode, and sensing_mode,
         but only for Dynamic and Semi-Dynamic licensing.
+        Sensing multipliers are engineering estimates; see code comments for rationale.
         """
         licensing_mode = getattr(arch_policy, 'licensing_mode', None)
         if licensing_mode not in ['Dynamic', 'Semi-Dynamic']:
@@ -151,12 +159,14 @@ class MetricsCollector:
             'Hierarchical': 1.5,
             'Co-Primary': 2
         }.get(getattr(arch_policy, 'priority_mode', None), 1)
-        return coord_queries * freq_mult * enforcement_mult * priority_mult
+        sensing_mult = self.SENSING_MULTIPLIERS.get(getattr(arch_policy, 'sensing_mode', None), 1.0)
+        return coord_queries * freq_mult * enforcement_mult * priority_mult * sensing_mult
 
     def apply_human_minutes_multipliers(self, human_minutes, arch_policy):
         """
-        Apply post-processing multipliers to the Human_Minutes metric based on freq_plan, enforcement_mode, and priority_mode,
+        Apply post-processing multipliers to the Human_Minutes metric based on freq_plan, enforcement_mode, priority_mode, and sensing_mode,
         but only for Manual licensing.
+        Sensing multipliers are engineering estimates; see code comments for rationale.
         """
         if getattr(arch_policy, 'licensing_mode', None) != 'Manual':
             return human_minutes
@@ -171,7 +181,8 @@ class MetricsCollector:
             'Hierarchical': 1.5,
             'Co-Primary': 2
         }.get(getattr(arch_policy, 'priority_mode', None), 1)
-        return human_minutes * freq_mult * enforcement_mult * priority_mult
+        sensing_mult = self.SENSING_MULTIPLIERS.get(getattr(arch_policy, 'sensing_mode', None), 1.0)
+        return human_minutes * freq_mult * enforcement_mult * priority_mult * sensing_mult
 
     def final_report(self, total_band_mhz, total_area_km2, sim_minutes, final_active_assignments, environment, arch_policy, mitigated_conflicts=None):
         """
@@ -189,14 +200,27 @@ class MetricsCollector:
         Returns:
             Dictionary of metrics
         """
+        # New SUE calculation per user request
+        # SUE = M / (B * S * T)
+        # M = number of active users at end of simulation
+        # B = total available bandwidth (600 MHz for 37 GHz band)
+        # S = area size in km^2 (number of squares)
+        # T = simulation time in days
+        M = len(final_active_assignments) if final_active_assignments is not None else 0
+        B = 600  # MHz, fixed for 37 GHz band
+        S = environment.num_squares if hasattr(environment, 'num_squares') else 1
+        T = sim_minutes / (60 * 24)  # convert minutes to days
+        user_sue = M / max(1, B * S * T)
+
+        # Keep previous SUEs for reference
         traditional_sue = self.mhz_km2_min_granted / max(1, total_band_mhz * total_area_km2 * sim_minutes)
+        correct_sue = self.total_mhz_min_km2 / max(1, total_band_mhz * total_area_km2 * sim_minutes)
         # Compute mean quality based on final active assignments, not just initial assignment time
         if final_active_assignments is not None and len(final_active_assignments) > 0:
             mean_quality = sum(a.quality for a in final_active_assignments) / max(1, len(final_active_assignments))
         else:
             mean_quality = self.quality_sum / max(1, self.quality_count)
         total_active_users = len(final_active_assignments) if final_active_assignments is not None else 0
-        correct_sue = self.total_mhz_min_km2 / max(1, total_band_mhz * total_area_km2 * sim_minutes)
         num_interfering, interference_rate = self.compute_interference(
             final_active_assignments, environment, arch_policy, mitigated_conflicts=mitigated_conflicts)
         interference_metrics = {
@@ -211,19 +235,24 @@ class MetricsCollector:
         base_coord_queries = self.coord_queries
         coord_queries = self.apply_query_multipliers(base_coord_queries, arch_policy)
 
-        # Compute coordination cost using the normalized formula
+       
+        # Coordination Index calculation per user request
+        # coordination_index = WH * (HCT / RT) + WD * (DBQ / RQ)
+        # WH = 1, WD = 1, RT = 1 min, RQ = 3000 queries
         WH = 1      # human coordination weight
         WD = 1      # database queries weight
-        RT = 1     # human reference time (minutes)
-        RQ = 100   # database queries reference
+        RT = 1      # human reference time (minutes)
+        RQ = 3000   # database queries reference
         HCT = human_minutes
         DBQ = coord_queries
-        coordination_cost = WH * (HCT / RT) + WD * (DBQ / RQ)
+        coordination_index = WH * (HCT / RT) + WD * (DBQ / RQ)
 
         blocking_prob = self.requests_denied / max(1, self.requests_total)
         return {
-            'SUE': traditional_sue, 
-            'Coordination_Cost': coordination_cost,
+            'SUE': user_sue, 
+            'SUE_traditional': traditional_sue,
+            'Coordination_Index': coordination_index,
+            'coord_queries': coord_queries,
             'Human_Minutes': human_minutes,
             'Requests_Total': self.requests_total,
             'Requests_Denied': self.requests_denied,

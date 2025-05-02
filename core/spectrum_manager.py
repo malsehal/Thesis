@@ -91,17 +91,43 @@ class SpectrumManager:
             current_tick: Current simulation tick
         """
         mode = self.arch_policy.coordination_mode
+        hybrid_toggle = getattr(self, '_hybrid_toggle', 0)
         for request in requests:
             request.add_trace(f"Arrived at time {request.arrival_time}: node={request.node_id}, requested_bw={request.requested_bw} MHz, device_type={request.device_type}")
             candidates = self._generate_frequency_candidates(request)
             assignment_made = False
-            # Hybrid: randomly choose centralized or decentralized for each request
+            # --- Hybrid: alternate between centralized and decentralized for each request ---
             if mode == "Hybrid":
-                use_centralized = random.random() < 0.5
+                use_centralized = (hybrid_toggle % 2 == 0)
+                hybrid_toggle += 1
             else:
                 use_centralized = (mode == "Centralized")
+            self._hybrid_toggle = hybrid_toggle if mode == "Hybrid" else 0
             for freq_start, freq_end in candidates:
+                # === ENFORCE EXCLUSIVITY BASED ON FREQ PLAN ===
+                if self.arch_policy.priority_mode == "Exclusive":
+                    if self.arch_policy.freq_plan == "Large Blocks":
+                        # Only one assignment per device type partition, globally
+                        if any(a.device_type == request.device_type for a in self.active):
+                            continue  # Partition already occupied
+                    elif self.arch_policy.freq_plan == "Sub Channels":
+                        # Once all sub-channels (600 MHz) are assigned, block further assignments
+                        assigned_bw = sum(a.freq_end - a.freq_start for a in self.active)
+                        if assigned_bw >= TOTAL_BANDWIDTH_MHZ:
+                            continue  # All spectrum occupied
+                    elif self.arch_policy.freq_plan == "Freq Slicing":
+                        # No overlap anywhere in the environment
+                        overlap = False
+                        for a in self.active:
+                            if not (freq_end <= a.freq_start or freq_start >= a.freq_end):
+                                overlap = True
+                                break
+                        if overlap:
+                            continue  # Requested slice is already occupied
                 # --- ENFORCE EXCLUSIVE MODE PARTITIONING ---
+                if self.arch_policy.freq_plan == "Large Blocks":
+                    block_size = 200
+                    freq_end = freq_start + block_size  # Always assign 200 MHz
                 if self.arch_policy.priority_mode == "Exclusive":
                     part = self.band_partitions.get(request.device_type)
                     if part is not None:
@@ -127,7 +153,7 @@ class SpectrumManager:
                         for square in n.covered_squares:
                             possible_conflicts.extend(self.square_to_assignments[square])
                 else:
-                    # Decentralized: check only assignments made by self and direct neighbors (not all assignments in shared squares)
+                    # --- Decentralized with 50% ignorance ---
                     neighbor_ids = set([request.node_id])
                     if hasattr(self.environment, 'get_neighbors'):
                         neighbor_ids.update(self.environment.get_neighbors(request.node_id))
@@ -139,6 +165,9 @@ class SpectrumManager:
                             # Only include assignments that were made by this neighbor (not all assignments in the square)
                             for assignment in self.square_to_assignments[square]:
                                 if assignment.node_id == n_id and id(assignment) not in seen_assignments:
+                                    # 50% chance to ignore this neighbor's assignment
+                                    if n_id != request.node_id and random.random() < 0.5:
+                                        continue
                                     possible_conflicts.append(assignment)
                                     seen_assignments.add(id(assignment))
                 # Deduplicate by id to avoid redundant checks
